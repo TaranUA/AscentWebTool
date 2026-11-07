@@ -1,7 +1,9 @@
 # C@ddx A$cent PC Tool (Web) — readable local copy
 
-A local, refactored copy of the unofficial browser-based Caddx Ascent firmware
-upgrade tool at <https://ascent.seriyps.com/>.
+> ### ▶ Open the live tool: **[https://taranua.github.io/AscentWebTool/](https://taranua.github.io/AscentWebTool/)**
+
+A readable, dependency-free copy of the unofficial Caddx Ascent firmware upgrade
+tool at <https://ascent.seriyps.com/>.
 
 > **Warning:** Unofficial, community-built tool — not affiliated with or
 > endorsed by Caddx. This writes to the device's flash; a failed or interrupted
