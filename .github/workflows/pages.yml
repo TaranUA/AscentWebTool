@@ -35,6 +35,9 @@ jobs:
           mkdir -p _site
           cp index.html favicon.svg .nojekyll _site/
           cp -R src _site/
+          mkdir -p _site/tests _site/reference
+          cp tests/index.html tests/tests.js _site/tests/
+          cp reference/original.min.js _site/reference/
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3

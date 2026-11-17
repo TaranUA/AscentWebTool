@@ -29,7 +29,7 @@ Open [localhost:5173](http://localhost:5173/). Web Serial requires a secure cont
 
 ## Run tests
 
-Open the [browser test page](http://localhost:5173/tests/) while the local server is running. To run the same headless Chrome check used in CI, use Node.js and an installed copy of Chrome:
+Open the [hosted browser test page](https://taranua.github.io/AscentWebTool/tests/) or use [localhost:5173/tests](http://localhost:5173/tests/) while the local server is running. The tests use a simulated device, so no hardware is needed. To run the same headless Chrome check used in CI, use Node.js and an installed copy of Chrome:
 
 ```sh
 node tests/run-browser.mjs
@@ -53,7 +53,7 @@ The app checks and reads the image, queries the device, and reopens the port aft
 
 The client rejects oversized or incomplete replies. Incoming CRC enforcement is pending verification against real device replies. The firmware MD5 is used for transfer verification and does not authenticate the image.
 
-For GitHub Pages, select **GitHub Actions** under **Settings → Pages**. The [Pages workflow](.github/workflows/pages.yml) runs the browser tests before publishing the app on pushes to `main` or manual runs. The reference bundle and tests are excluded from the deployed site.
+For GitHub Pages, select **GitHub Actions** under **Settings → Pages**. The [Pages workflow](.github/workflows/pages.yml) runs the browser tests before publishing the app and its browser test page on pushes to `main` or manual runs.
 
 ## Sources and credits
 
