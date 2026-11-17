@@ -843,4 +843,14 @@ async function run() {
   window.__ascentTestResults = { passed, failed, lines };
 }
 
-void run();
+void run().finally(() => {
+  if (location.search !== "?report=1") return;
+  return fetch("/tests/result", {
+    method: "POST",
+    body: JSON.stringify({
+      summary: summary.textContent,
+      results: window.__ascentTestResults ?? null,
+      details: results.textContent,
+    }),
+  });
+});

@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
-import { promisify } from "node:util";
 
 const chrome = process.env.CHROME_BIN || (process.platform === "win32"
   ? "C:/Program Files/Google/Chrome/Application/chrome.exe"
@@ -11,8 +10,26 @@ const chrome = process.env.CHROME_BIN || (process.platform === "win32"
     ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     : "google-chrome");
 const mimeTypes = { ".html": "text/html", ".js": "text/javascript" };
+const { promise: completed, resolve: finish, reject: fail } = Promise.withResolvers();
 const server = createServer(async (req, res) => {
-  const path = req.url === "/tests/" ? "/tests/index.html" : req.url;
+  const pathname = new URL(req.url, "http://localhost").pathname;
+  if (req.method === "POST" && pathname === "/tests/result") {
+    try {
+      let body = "";
+      for await (const chunk of req) {
+        body += chunk;
+        if (body.length > 64 * 1024) throw new Error("Browser test report too large");
+      }
+      const report = JSON.parse(body);
+      res.writeHead(204).end();
+      finish(report);
+    } catch (error) {
+      res.writeHead(400).end();
+      fail(error);
+    }
+    return;
+  }
+  const path = pathname === "/tests/" ? "/tests/index.html" : pathname;
   if (!/^\/(tests|src|reference)\/[\w.-]+\.(html|js)$/.test(path)) {
     res.writeHead(404).end();
     return;
@@ -27,22 +44,40 @@ const server = createServer(async (req, res) => {
 
 const temp = await realpath(tmpdir());
 const profile = await mkdtemp(join(temp, "ascent-browser-test-"));
+let browser;
+let browserClosed;
+let timeout;
 try {
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
-  const { stdout } = await promisify(execFile)(chrome, [
-    "--headless", "--disable-gpu", "--no-first-run", "--dump-dom",
-    "--virtual-time-budget=15000", `--user-data-dir=${profile}`,
-    `http://127.0.0.1:${server.address().port}/tests/`,
-  ], { timeout: 30000, windowsHide: true });
-  const summary = stdout.match(/<p id="summary">([^<]*)<\/p>/)?.[1];
-  const results = stdout.match(/<pre id="results">([\s\S]*?)<\/pre>/)?.[1];
-  console.log(summary || "Browser did not produce a test summary");
-  if (results) console.log(results);
-  if (!/^[1-9]\d* passed, 0 failed$/.test(summary ?? "")) process.exitCode = 1;
+  let diagnostics = "";
+  browser = spawn(chrome, [
+    "--headless", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`,
+    `http://127.0.0.1:${server.address().port}/tests/?report=1`,
+  ], { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
+  browser.stderr.setEncoding("utf8").on("data", (chunk) => {
+    diagnostics = (diagnostics + chunk).slice(-4000);
+  });
+  browser.once("error", fail);
+  browserClosed = new Promise((resolve) => {
+    browser.once("close", (code, signal) => {
+      fail(new Error(`Chrome exited before reporting results (${code ?? signal}).\n${diagnostics}`));
+      resolve();
+    });
+  });
+  timeout = setTimeout(() => {
+    fail(new Error(`Timed out waiting for Chrome test results.\n${diagnostics}`));
+  }, 45000);
+  const { summary, results, details } = await completed;
+  console.log(summary);
+  if (details) console.log(details);
+  if (!(results?.passed > 0 && results.failed === 0)) process.exitCode = 1;
 } finally {
+  clearTimeout(timeout);
+  browser?.kill();
+  await browserClosed;
   server.close();
   const resolved = await realpath(profile);
   if (dirname(resolved) === temp) {
