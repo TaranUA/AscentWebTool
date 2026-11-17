@@ -820,6 +820,7 @@ test("Protocol client reports oversized and incomplete responses", async () => {
 
 async function run() {
   if (missingOriginalFunctions.length > 0) {
+    summary.classList.add("fail");
     summary.textContent = "Cannot run: original reference functions are missing.";
     results.textContent = missingOriginalFunctions
       .map((name) => `FAIL  reference function window.${name} is unavailable`)
@@ -839,6 +840,7 @@ async function run() {
   }
 
   summary.textContent = `${passed} passed, ${failed} failed`;
+  summary.classList.add(failed ? "fail" : "pass");
   results.textContent = lines.join("\n");
   window.__ascentTestResults = { passed, failed, lines };
 }

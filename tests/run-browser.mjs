@@ -9,7 +9,7 @@ const chrome = process.env.CHROME_BIN || (process.platform === "win32"
   : process.platform === "darwin"
     ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     : "google-chrome");
-const mimeTypes = { ".html": "text/html", ".js": "text/javascript" };
+const mimeTypes = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 const { promise: completed, resolve: finish, reject: fail } = Promise.withResolvers();
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url, "http://localhost").pathname;
@@ -30,7 +30,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   const path = pathname === "/tests/" ? "/tests/index.html" : pathname;
-  if (!/^\/(tests|src|reference)\/[\w.-]+\.(html|js)$/.test(path)) {
+  if (!/^\/(tests|src|reference)\/[\w.-]+\.(html|js|css)$/.test(path)) {
     res.writeHead(404).end();
     return;
   }
