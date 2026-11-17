@@ -29,7 +29,7 @@ import {
   parseHeader,
   parseUpgradeStatus,
 } from "../src/packet.js";
-import { SerialTransport } from "../src/transport.js";
+import { SerialTransport, TransportTimeoutError } from "../src/transport.js";
 
 const summary = document.getElementById("summary");
 const results = document.getElementById("results");
@@ -715,6 +715,103 @@ test("Full upgrade flow matches the original implementation", async () => {
   assertEqual(refactoredPort.closeCount, 3, "refactored transport closed after each phase");
   assertEqual(originalPort.openCount, 3, "original transport reopened after reboots");
   assertEqual(originalPort.closeCount, 3, "original transport closed after each phase");
+});
+
+test("Serial transport releases both locks and can reopen the port", async () => {
+  class LockCheckingPort extends MockPort {
+    async open() {
+      assert(!this.readable && !this.writable, "previous port session must be closed");
+      await super.open();
+    }
+
+    async close() {
+      assert(!this.readable.locked, "reader lock must be released before close");
+      assert(!this.writable.locked, "writer lock must be released before close");
+      await super.close();
+    }
+  }
+  const port = new LockCheckingPort(makeDeviceInfoPayload());
+  for (let session = 0; session < 2; session += 1) {
+    const transport = new SerialTransport(port);
+    await transport.open();
+    try {
+      await new AscentClient(transport).getDeviceInfo();
+    } finally {
+      await transport.close();
+    }
+  }
+  assertEqual(port.closeCount, 2, "both sessions closed");
+});
+
+test("Invalid firmware is rejected before opening the serial port", async () => {
+  const cases = [
+    [new File([], "empty.img"), "Firmware image is empty"],
+    [new File(["data"], "wrong.txt"), "Select an .img firmware file"],
+    [{ name: "large.img", size: 0x80000000 }, "Firmware image exceeds the protocol size limit"],
+    [{
+      name: "unreadable.img",
+      size: 1,
+      async arrayBuffer() { throw new Error("read failed"); },
+    }, "Could not read the firmware image"],
+  ];
+  for (const [firmwareFile, message] of cases) {
+    let created = false;
+    const result = await upgradeFirmware({
+      firmwareFile,
+      createTransport() { created = true; throw new Error("serial should not be used"); },
+    });
+    assert(!created, "serial transport was not created");
+    assertDeepEqual(result, { success: false, message }, "validation result");
+  }
+});
+
+test("Upgrade warns when flashing finishes but the final device query fails", async () => {
+  class FinalQueryFailurePort extends MockPort {
+    respond(header, payload) {
+      super.respond(header, this.openCount === 3 && header.command === Command.GET_DEVICE_INFO
+        ? new Uint8Array(1)
+        : payload);
+    }
+  }
+  const port = new FinalQueryFailurePort(makeDeviceInfoPayload());
+  const result = await upgradeFirmware({
+    createTransport: () => new SerialTransport(port),
+    deviceName: "Ascent_VRX",
+    firmwareFile: new File(["data"], "firmware.img"),
+    delay: async () => {},
+  });
+  assert(!result.success && result.warning, "final query failure is reported as unverified");
+  assert(result.message.includes("could not be verified after reboot"), "warning explains the outcome");
+  assertEqual(port.closeCount, 3, "last port session was closed");
+});
+
+test("Protocol client reports oversized and incomplete responses", async () => {
+  for (const [length, expected, expectedReads] of [
+    [65537, "Serial response payload too large", 1],
+    [300, "Incomplete serial response", 2],
+  ]) {
+    const header = buildPacket(Command.GET_DEVICE_INFO, {
+      sequence: 0,
+      payload: new Uint8Array(length),
+      type: 2,
+    }).subarray(0, HEADER_SIZE);
+    let reads = 0;
+    const client = new AscentClient({
+      async write() {},
+      async readExact() {
+        if (++reads === 1) return header;
+        throw new TransportTimeoutError();
+      },
+    });
+    let error;
+    try {
+      await client.getDeviceInfo();
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error?.message.includes(expected), `expected ${expected}, got ${error}`);
+    assertEqual(reads, expectedReads, "oversized payload was not read");
+  }
 });
 
 // ---------------------------------------------------------------------------

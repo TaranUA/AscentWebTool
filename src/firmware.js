@@ -46,7 +46,7 @@ export class AbortedError extends Error {
  * @param {(event: {stepName: string, percent: number, message: string}) => void} [options.onProgress]
  * @param {AbortSignal} [options.signal]
  * @param {(ms: number, signal?: AbortSignal) => Promise<void>} [options.delay]
- * @returns {Promise<{success: boolean, message: string}>}
+ * @returns {Promise<{success: boolean, message: string, warning?: boolean}>}
  */
 export async function upgradeFirmware({
   createTransport,
@@ -56,10 +56,15 @@ export async function upgradeFirmware({
   signal,
   delay = sleep,
 }) {
-  let transport = createTransport();
+  let transport;
   let client;
 
   try {
+    const metadata = await prepareFirmware(firmwareFile);
+    const { bytes: firmwareBytes, payload: fileStartPayload } = metadata;
+    if (signal?.aborted) throw new AbortedError();
+
+    transport = createTransport();
     await transport.open();
     client = new AscentClient(transport);
 
@@ -84,18 +89,8 @@ export async function upgradeFirmware({
     assertMatched(await client.sendWithAck(Command.REMOTE_UPGRADE), "REMOTE_UPGRADE failed");
 
     emitProgress(onProgress, "SendFileStart", 0.17, "Starting file transfer");
-    const firmwareBytes = new Uint8Array(await firmwareFile.arrayBuffer());
-    const firmwareHash = md5Hex(firmwareBytes);
-    const remotePath = `/tmp/pc/${firmwareFile.name}`;
-    const metadata = buildFileStartPayload(
-      firmwareHash,
-      firmwareBytes.length,
-      remotePath,
-      firmwareFile.name,
-    );
-
     assertMatched(
-      await client.sendWithAck(Command.SEND_FILE_START, metadata),
+      await client.sendWithAck(Command.SEND_FILE_START, fileStartPayload),
       "SENDFILE_START failed",
     );
 
@@ -143,20 +138,20 @@ export async function upgradeFirmware({
     await pollUpgradeStatus(client, onProgress, signal, delay);
 
     emitProgress(onProgress, "Reboot", 0.98, "Rebooting device");
-    ({ transport, client } = await reconnectDevice(
-      createTransport,
-      transport,
-      deviceName,
-      signal,
-      delay,
-    ));
-
-    // The device is fully booted when it answers again. A failure here does
-    // not invalidate the upgrade, so it is deliberately ignored.
     try {
+      ({ transport, client } = await reconnectDevice(
+        createTransport,
+        transport,
+        deviceName,
+        signal,
+        delay,
+      ));
       await client.getDeviceInfo();
-    } catch {
-      // Ignore.
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = `Device reported flashing complete, but could not be verified after reboot (${detail}).`;
+      emitProgress(onProgress, "Unverified", 1, message);
+      return { success: false, warning: true, message };
     }
 
     emitProgress(onProgress, "Done", 1, "Upgrade complete");
@@ -170,8 +165,31 @@ export async function upgradeFirmware({
       message: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    await transport.close();
+    await transport?.close();
   }
+}
+
+async function prepareFirmware(file) {
+  if (!file || !/\.img$/i.test(file.name)) throw new Error("Select an .img firmware file");
+  if (file.size === 0) throw new Error("Firmware image is empty");
+
+  // The wire format encodes the size as a signed 32-bit integer.
+  const maxSize = 0x7fffffff;
+  if (file.size > maxSize) throw new Error("Firmware image exceeds the protocol size limit");
+
+  let bytes;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch (error) {
+    throw new Error("Could not read the firmware image", { cause: error });
+  }
+  if (bytes.length === 0) throw new Error("Firmware image is empty");
+  if (bytes.length > maxSize) throw new Error("Firmware image exceeds the protocol size limit");
+
+  return {
+    bytes,
+    payload: buildFileStartPayload(md5Hex(bytes), bytes.length, `/tmp/pc/${file.name}`, file.name),
+  };
 }
 
 async function pollUpgradeStatus(client, onProgress, signal, delay) {

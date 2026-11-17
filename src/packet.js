@@ -203,6 +203,10 @@ export function parseDeviceInfo(payload) {
  * Parses the response to SEND_FILE_END.
  */
 export function parseFileEndResponse(payload) {
+  // The fixed numeric prefix is required; the trailing text may be shortened.
+  if (payload.length < 16) {
+    throw new Error(`SENDFILE_END payload too short: ${payload.length} bytes`);
+  }
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
 
   return {
@@ -218,6 +222,9 @@ export function parseFileEndResponse(payload) {
  * Parses the response to UPGRADE_STATUS.
  */
 export function parseUpgradeStatus(payload) {
+  if (payload.length < 8) {
+    throw new Error(`UPGRADE_STATUS payload too short: ${payload.length} bytes`);
+  }
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
 
   return {

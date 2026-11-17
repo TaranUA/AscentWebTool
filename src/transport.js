@@ -28,18 +28,25 @@ export class SerialTransport {
     this.pending = new Uint8Array(0);
     this.pumpError = null;
     this.waiters = [];
+    this.opened = false;
   }
 
   async open(baudRate = 115200) {
     await this.port.open({ baudRate });
-
-    if (!this.port.readable || !this.port.writable) {
-      throw new Error("serial port has no readable/writable stream after open()");
+    this.opened = true;
+    this.pending = new Uint8Array(0);
+    this.pumpError = null;
+    try {
+      if (!this.port.readable || !this.port.writable) {
+        throw new Error("serial port has no readable/writable stream after open()");
+      }
+      this.writer = this.port.writable.getWriter();
+      this.reader = this.port.readable.getReader();
+      this.pump = this.pumpLoop();
+    } catch (error) {
+      await this.close();
+      throw error;
     }
-
-    this.writer = this.port.writable.getWriter();
-    this.reader = this.port.readable.getReader();
-    void this.pumpLoop();
   }
 
   /** Continuously moves bytes from the serial reader into `pending`. */
@@ -50,7 +57,11 @@ export class SerialTransport {
     try {
       for (;;) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          this.pumpError = new Error("Serial input closed");
+          this.wakeWaiters();
+          break;
+        }
         if (!value || value.length === 0) continue;
 
         const combined = new Uint8Array(this.pending.length + value.length);
@@ -73,11 +84,15 @@ export class SerialTransport {
 
   waitForDataOrTimeout(timeoutMs) {
     return new Promise((resolve) => {
-      const timer = setTimeout(resolve, timeoutMs);
-      this.waiters.push(() => {
+      const wake = () => {
         clearTimeout(timer);
         resolve();
-      });
+      };
+      const timer = setTimeout(() => {
+        this.waiters = this.waiters.filter((waiter) => waiter !== wake);
+        resolve();
+      }, timeoutMs);
+      this.waiters.push(wake);
     });
   }
 
@@ -130,25 +145,29 @@ export class SerialTransport {
   }
 
   async close() {
+    if (!this.opened) return;
+    const reader = this.reader;
     try {
-      await this.reader?.cancel();
+      await reader?.cancel();
     } catch {
-      // Already cancelled or the device disappeared.
+      // An errored or disconnected stream can reject cancellation.
     }
 
-    try {
-      this.writer?.releaseLock();
-    } catch {
-      // Already released.
-    }
+    await this.pump;
+    reader?.releaseLock();
+    this.writer?.releaseLock();
 
     this.reader = null;
     this.writer = null;
+    this.pump = null;
 
     try {
       await this.port.close();
-    } catch {
-      // Already closed.
+    } catch (error) {
+      if (this.port.readable || this.port.writable) {
+        throw new Error("Could not close the serial port", { cause: error });
+      }
     }
+    this.opened = false;
   }
 }

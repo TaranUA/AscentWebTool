@@ -50,15 +50,15 @@ function log(message) {
 
 /** Clears the progress bar, status text, and success/failure colours. */
 function resetProgress() {
-  elements.progressBar.classList.remove("success", "failure");
+  elements.progressBar.classList.remove("success", "failure", "warning");
   elements.progressBar.style.width = "0%";
-  elements.statusText.classList.remove("success", "failure");
+  elements.statusText.classList.remove("success", "failure", "warning");
   elements.statusText.textContent = "";
 }
 
 /**
  * Asks the browser for a serial port and reads the connected device's info.
- * The port is intentionally kept open for the later upgrade operation.
+ * The port is closed after inspection and reopened for the upgrade.
  */
 async function handleConnect() {
   if (!navigator.serial) return;
@@ -157,6 +157,7 @@ async function handleUpgrade() {
   elements.upgradeButton.disabled = true;
   elements.fileInput.disabled = true;
   resetProgress();
+  elements.statusText.textContent = "Checking firmware image…";
 
   const port = state.port;
   const reportProgress = (event) => {
@@ -166,28 +167,32 @@ async function handleUpgrade() {
     log(`[${event.stepName}] ${event.message} — ${percent}%`);
   };
 
-  const result = await upgradeFirmware({
-    createTransport: () => new SerialTransport(port),
-    deviceName: state.deviceInfo.deviceName,
-    firmwareFile: state.firmwareFile,
-    onProgress: reportProgress,
-  });
-
-  if (result.success) {
-    elements.progressBar.classList.add("success");
-    elements.statusText.classList.add("success");
-    elements.statusText.textContent = "Upgrade complete.";
-  } else {
-    elements.progressBar.classList.add("failure");
-    elements.statusText.classList.add("failure");
-    elements.statusText.textContent = `Upgrade failed: ${result.message}`;
+  try {
+    const result = await upgradeFirmware({
+      createTransport: () => new SerialTransport(port),
+      deviceName: state.deviceInfo.deviceName,
+      firmwareFile: state.firmwareFile,
+      onProgress: reportProgress,
+    });
+    const style = result.warning ? "warning" : result.success ? "success" : "failure";
+    const message = result.warning || result.success
+      ? result.message
+      : `Upgrade failed: ${result.message}`;
+    showUpgradeResult(style, message);
+  } catch (error) {
+    showUpgradeResult("warning", `Could not finish serial cleanup: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    elements.connectButton.disabled = false;
+    elements.fileInput.disabled = false;
+    elements.upgradeButton.disabled = false;
   }
+}
 
-  log(result.success ? "Upgrade complete." : `Upgrade failed: ${result.message}`);
-
-  elements.connectButton.disabled = false;
-  elements.fileInput.disabled = false;
-  elements.upgradeButton.disabled = false;
+function showUpgradeResult(style, message) {
+  elements.progressBar.classList.add(style);
+  elements.statusText.classList.add(style);
+  elements.statusText.textContent = message;
+  log(message);
 }
 
 function getElement(id) {

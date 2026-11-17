@@ -24,6 +24,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Run browser tests
+        run: node tests/run-browser.mjs
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 

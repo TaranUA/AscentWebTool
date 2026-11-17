@@ -16,6 +16,10 @@ import {
 import { buildPacket, EMPTY_PAYLOAD, parseDeviceInfo, parseHeader } from "./packet.js";
 import { TransportTimeoutError } from "./transport.js";
 
+// Upgrade replies carry acknowledgments or small status records (device info
+// is 300 bytes). Leave room for firmware-specific extensions.
+const MAX_RESPONSE_PAYLOAD_BYTES = 64 * 1024;
+
 export class AscentClient {
   constructor(transport) {
     this.transport = transport;
@@ -96,11 +100,26 @@ export class AscentClient {
         throw new Error(`bad magic in response: 0x${header.magic.toString(16)}`);
       }
 
-      // Keep the original timeout semantics: the payload read gets the time
-      // that was left when this loop iteration started.
-      const responsePayload = header.payloadLength > 0
-        ? await this.transport.readExact(header.payloadLength, remaining)
-        : EMPTY_PAYLOAD;
+      if (header.payloadLength > MAX_RESPONSE_PAYLOAD_BYTES) {
+        throw new Error(`Serial response payload too large: ${header.payloadLength} bytes`);
+      }
+
+      let responsePayload = EMPTY_PAYLOAD;
+      if (header.payloadLength > 0) {
+        try {
+          responsePayload = await this.transport.readExact(
+            header.payloadLength,
+            Math.max(0, deadline - Date.now()),
+          );
+        } catch (error) {
+          if (!(error instanceof TransportTimeoutError)) throw error;
+          throw new Error(`Incomplete serial response: expected ${header.payloadLength} payload bytes`, {
+            cause: error,
+          });
+        }
+      }
+
+      // Confirm device response CRC coverage on hardware before enforcing it.
 
       if (header.command === expectedCommand && header.sequence === sequence) {
         return {
