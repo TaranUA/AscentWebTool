@@ -17,7 +17,7 @@ An unofficial browser-based firmware upgrader for Caddx Ascent FPV video devices
 
 The device's reported information matters more than the USB label or vendor ID. For example, the upstream author observed both the Ascent Lite+ and GT Pro using USB vendor ID `0x1D76`. See the [upstream hardware notes](https://github.com/seriyps/ascent-pc-tool/blob/4d990c0e241afd825b2dc33a07098108badae269/AGENTS.md#the-hardware).
 
-Chrome can reconnect without the picker when it still grants the site access to the port. If clean mode omits the device serial number, the optional reconnect checkbox lets the tool use a single authorized port with matching USB IDs, model, and firmware. Enable it only when one matching device is plugged in. Chrome administrators can grant access for a specific origin and USB device type using [SerialAllowUsbDevicesForUrls](https://chromeenterprise.google/intl/en_us/policies/serial-allow-usb-devices-for-urls/). That setting applies to the entire origin.
+Chrome can reconnect without the picker when it still grants the site access to the port. If clean mode omits the device serial number, the reconnect checkbox lets the tool use a single authorized port with matching USB IDs, model, and firmware. It is checked by default. Uncheck it if more than one matching device is plugged in. Chrome administrators can grant access for a specific origin and USB device type using [SerialAllowUsbDevicesForUrls](https://chromeenterprise.google/intl/en_us/policies/serial-allow-usb-devices-for-urls/). That setting applies to the entire origin.
 
 ## Run locally
 
