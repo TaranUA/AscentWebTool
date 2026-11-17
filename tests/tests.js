@@ -30,6 +30,7 @@ import {
   parseUpgradeStatus,
 } from "../src/packet.js";
 import { SerialTransport, TransportTimeoutError } from "../src/transport.js";
+import { SerialReconnector } from "../src/serial-reconnect.js";
 
 const summary = document.getElementById("summary");
 const results = document.getElementById("results");
@@ -741,6 +742,60 @@ test("Serial transport releases both locks and can reopen the port", async () =>
     }
   }
   assertEqual(port.closeCount, 2, "both sessions closed");
+});
+
+test("Reconnect refreshes the browser ports and checks the device serial number", async () => {
+  class RebootPort extends MockPort {
+    getInfo() { return { usbVendorId: 7541, usbProductId: 257 }; }
+  }
+  const original = new RebootPort(makeDeviceInfoPayload());
+  original.connected = false;
+  const other = new RebootPort(makeDeviceInfoPayload({ serialNumber: "SN-other" }));
+  const rebooted = new RebootPort(makeDeviceInfoPayload({ hardwareVersion: "clean mode" }));
+  let ports = [];
+  const connector = new SerialReconnector({ getPorts: async () => ports }, original);
+  let initialError;
+  try {
+    await connector.open(parseDeviceInfo(original.deviceInfoPayload), 5000);
+  } catch (error) {
+    initialError = error;
+  }
+  assert(initialError?.message.includes("port picker"), "a missing port should offer manual selection");
+
+  ports = [other, rebooted];
+  const reopened = await connector.open(parseDeviceInfo(original.deviceInfoPayload), 5000);
+  try {
+    assertEqual(original.openCount, 0, "stale port was not opened");
+    assertEqual(other.closeCount, 1, "other receiver was rejected and closed");
+    assertEqual(other.commandLog.length, 1, "other receiver only received an identity query");
+    assertEqual(other.commandLog[0].command, Command.GET_DEVICE_INFO, "identity request");
+    assertEqual(reopened.transport.port, rebooted, "used the re-enumerated receiver");
+  } finally {
+    await reopened.transport.close();
+  }
+});
+
+test("Reconnect allows a user-selected clean-mode port with no serial number", async () => {
+  class RebootPort extends MockPort {
+    getInfo() { return { usbVendorId: 7541, usbProductId: 257 }; }
+  }
+  const original = new RebootPort(makeDeviceInfoPayload());
+  original.connected = false;
+  const clean = new RebootPort(makeDeviceInfoPayload({ serialNumber: "" }));
+  const connector = new SerialReconnector({
+    getPorts: async () => [],
+    requestPort: async ({ filters }) => {
+      assertDeepEqual(filters, [{ usbVendorId: 7541, usbProductId: 257 }], "picker filters");
+      return clean;
+    },
+  }, original);
+  await connector.selectPort();
+  const reopened = await connector.open(parseDeviceInfo(original.deviceInfoPayload), 5000);
+  try {
+    assertEqual(reopened.transport.port, clean, "used the explicitly selected receiver");
+  } finally {
+    await reopened.transport.close();
+  }
 });
 
 test("Invalid firmware is rejected before opening the serial port", async () => {

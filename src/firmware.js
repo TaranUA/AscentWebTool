@@ -8,8 +8,7 @@
  *   4. Ask the device to verify the image and poll its flashing progress.
  *   5. Wait for the final reboot and query the device once more.
  *
- * The device may reboot more than once, so every transport is created from
- * the same SerialPort object rather than held open for the whole operation.
+ * The serial connection is closed and reopened around each reboot.
  */
 
 import {
@@ -41,6 +40,7 @@ export class AbortedError extends Error {
 /**
  * @param {object} options
  * @param {() => import("./transport.js").SerialTransport} options.createTransport
+ * @param {(deviceInfo: object, remainingMs: number) => Promise<{transport: import("./transport.js").SerialTransport, client: AscentClient}>} [options.openReconnectedPort]
  * @param {string} options.deviceName
  * @param {File} options.firmwareFile
  * @param {(event: {stepName: string, percent: number, message: string}) => void} [options.onProgress]
@@ -50,6 +50,11 @@ export class AbortedError extends Error {
  */
 export async function upgradeFirmware({
   createTransport,
+  openReconnectedPort = async () => {
+    const transport = createTransport();
+    await transport.open();
+    return { transport, client: new AscentClient(transport) };
+  },
   deviceName,
   firmwareFile,
   onProgress,
@@ -78,8 +83,9 @@ export async function upgradeFirmware({
     await client.sendNoAck(Command.REBOOT, paddedUtf8("clean", 32));
 
     ({ transport, client } = await reconnectDevice(
-      createTransport,
+      openReconnectedPort,
       transport,
+      deviceInfo,
       deviceName,
       signal,
       delay,
@@ -96,6 +102,7 @@ export async function upgradeFirmware({
 
     emitProgress(onProgress, "SendFileData", 0.17, "Transferring firmware");
     let offset = 0;
+    let chunkRetries = 0;
 
     while (offset < firmwareBytes.length) {
       if (signal?.aborted) throw new AbortedError();
@@ -115,6 +122,7 @@ export async function upgradeFirmware({
         },
       });
       assertMatched(response, "SENDFILE_DATA failed");
+      chunkRetries += response.retryCount;
 
       offset += chunkLength;
       emitProgress(
@@ -131,7 +139,11 @@ export async function upgradeFirmware({
 
     const fileEnd = parseFileEndResponse(fileEndResponse.payload);
     if (fileEnd.status !== 0 || fileEnd.detail !== "OK") {
-      throw new Error(fileEnd.detail || "SENDFILE_END reported failure");
+      const detail = fileEnd.detail || "SENDFILE_END reported failure";
+      throw new Error(
+        `${detail}. Device reports ${fileEnd.currentSize}/${fileEnd.totalSize} bytes. ` +
+        `Image: ${firmwareBytes.length} bytes. Chunk retries: ${chunkRetries}.`,
+      );
     }
 
     emitProgress(onProgress, "UpgradeStatus", 0.65, "Polling upgrade status");
@@ -140,8 +152,9 @@ export async function upgradeFirmware({
     emitProgress(onProgress, "Reboot", 0.98, "Rebooting device");
     try {
       ({ transport, client } = await reconnectDevice(
-        createTransport,
+        openReconnectedPort,
         transport,
+        deviceInfo,
         deviceName,
         signal,
         delay,
@@ -220,32 +233,32 @@ async function pollUpgradeStatus(client, onProgress, signal, delay) {
 
 /**
  * Closes the current transport, waits for the device to reboot, then opens a
- * fresh transport on the same port until the device responds or time runs out.
+ * new connection until it succeeds or time runs out.
  */
-async function reconnectDevice(createTransport, transport, deviceName, signal, delay) {
+async function reconnectDevice(openPort, transport, deviceInfo, deviceName, signal, delay) {
   await transport.close();
   await delay(rebootDelayMs(deviceName), signal);
 
   const deadline = Date.now() + REBOOT_TIMEOUT_MS;
+  let lastError;
 
   for (;;) {
     if (signal?.aborted) throw new AbortedError();
 
-    if (Date.now() >= deadline) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      const detail = lastError instanceof Error ? lastError.message : String(lastError);
       throw new Error(
-        `device did not reappear within ${REBOOT_TIMEOUT_MS}ms after reboot`,
+        `Could not reconnect after reboot: ${detail}`,
+        { cause: lastError },
       );
     }
 
     try {
-      const nextTransport = createTransport();
-      await nextTransport.open();
-      return {
-        transport: nextTransport,
-        client: new AscentClient(nextTransport),
-      };
-    } catch {
-      await delay(REBOOT_RETRY_INTERVAL_MS, signal);
+      return await openPort(deviceInfo, remaining);
+    } catch (error) {
+      lastError = error;
+      await delay(Math.min(REBOOT_RETRY_INTERVAL_MS, Math.max(0, deadline - Date.now())), signal);
     }
   }
 }

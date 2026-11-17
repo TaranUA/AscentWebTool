@@ -38,8 +38,8 @@ export class AscentClient {
   }
 
   /** Fetches and parses the device information block. */
-  async getDeviceInfo() {
-    const response = await this.sendWithAck(Command.GET_DEVICE_INFO);
+  async getDeviceInfo(options) {
+    const response = await this.sendWithAck(Command.GET_DEVICE_INFO, EMPTY_PAYLOAD, options);
     if (!response.matched) {
       throw new Error("FIND_DEVICE timed out");
     }

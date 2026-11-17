@@ -9,6 +9,7 @@ import { SERIAL_PORT_FILTERS } from "./constants.js";
 import { AscentClient } from "./client.js";
 import { expectedFirmwareToken, firmwareNameMismatch } from "./device.js";
 import { upgradeFirmware } from "./firmware.js";
+import { SerialReconnector } from "./serial-reconnect.js";
 import { SerialTransport } from "./transport.js";
 
 const elements = {
@@ -18,6 +19,7 @@ const elements = {
   firmwareHint: getElement("firmware-hint"),
   fileInput: getElement("file-input"),
   upgradeButton: getElement("btn-upgrade"),
+  reconnectButton: getElement("btn-reconnect"),
   progressBar: getElement("progress-bar"),
   statusText: getElement("status-text"),
   log: getElement("log"),
@@ -160,6 +162,20 @@ async function handleUpgrade() {
   elements.statusText.textContent = "Checking firmware image…";
 
   const port = state.port;
+  const reconnect = new SerialReconnector(navigator.serial, port);
+  const selectRebootedPort = async () => {
+    elements.reconnectButton.disabled = true;
+    try {
+      await reconnect.selectPort();
+    } catch (error) {
+      if (error?.name !== "NotFoundError") {
+        log(`Port selection failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } finally {
+      elements.reconnectButton.disabled = false;
+    }
+  };
+  elements.reconnectButton.addEventListener("click", selectRebootedPort);
   const reportProgress = (event) => {
     const percent = Math.round(event.percent * 100);
     elements.progressBar.style.width = `${percent}%`;
@@ -170,6 +186,17 @@ async function handleUpgrade() {
   try {
     const result = await upgradeFirmware({
       createTransport: () => new SerialTransport(port),
+      openReconnectedPort: async (deviceInfo, remainingMs) => {
+        try {
+          const reopened = await reconnect.open(deviceInfo, remainingMs);
+          elements.reconnectButton.hidden = true;
+          return reopened;
+        } catch (error) {
+          elements.reconnectButton.hidden = false;
+          elements.statusText.textContent = "Waiting for the device. If it has reappeared, select its port again.";
+          throw error;
+        }
+      },
       deviceName: state.deviceInfo.deviceName,
       firmwareFile: state.firmwareFile,
       onProgress: reportProgress,
@@ -182,6 +209,9 @@ async function handleUpgrade() {
   } catch (error) {
     showUpgradeResult("warning", `Could not finish serial cleanup: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
+    state.port = reconnect.port;
+    elements.reconnectButton.hidden = true;
+    elements.reconnectButton.removeEventListener("click", selectRebootedPort);
     elements.connectButton.disabled = false;
     elements.fileInput.disabled = false;
     elements.upgradeButton.disabled = false;

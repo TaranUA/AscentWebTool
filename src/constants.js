@@ -53,6 +53,9 @@ export const WRITE_SLICE_SIZE = 32 * 1024;
 /** Chunk size used when the device does not report its own limit. */
 export const DEFAULT_RECEIVE_CHUNK_SIZE = 1024 * 1024;
 
+/** Web Serial buffer capacity for a typical 1 MiB firmware packet. */
+export const SERIAL_BUFFER_SIZE = DEFAULT_RECEIVE_CHUNK_SIZE + HEADER_SIZE;
+
 /** Time allowed for an acknowledged command, including retries. */
 export const ACK_TIMEOUT_MS = 20_000;
 

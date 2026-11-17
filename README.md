@@ -12,7 +12,7 @@ An unofficial browser-based firmware upgrader for Caddx Ascent FPV video devices
 1. Open the tool in a browser with [Web Serial support](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API#browser_compatibility), such as Chrome or Edge.
 2. Plug in the device, click **Connect**, and pick its USB serial port. It may appear as **SerialGadget** or **VRX Gadget**. Check the model, firmware, and hardware version shown in the app.
 3. Select the matching `.img` file from [Caddx's firmware releases](https://github.com/CaddxFPV-Tech/Caddx-Ascent-Firmware-Release). Firmware is not bundled here. The filename warning is a hint; a matching name does not establish compatibility or authenticity.
-4. Click **Upgrade** and follow the status. The device may restart during the process.
+4. Click **Upgrade** and follow the status. The device may restart during the process. If Chrome loses track of the port after a reboot, click **Select port again** when it appears and choose the same device.
 5. When the tool finishes, click **Connect** again to display the installed firmware version. If the app says flashing finished but could not be verified after reboot, check whether the device responds before trying another upgrade.
 
 The device's reported information matters more than the USB label or vendor ID. For example, the upstream author observed both the Ascent Lite+ and GT Pro using USB vendor ID `0x1D76`. See the [upstream hardware notes](https://github.com/seriyps/ascent-pc-tool/blob/4d990c0e241afd825b2dc33a07098108badae269/AGENTS.md#the-hardware).
@@ -37,7 +37,9 @@ node tests/run-browser.mjs
 
 Set `CHROME_BIN` to the browser executable if Chrome is installed in a nonstandard location.
 
-Expected result: **20 passed, 0 failed**. The suite includes 16 parity tests against the saved upstream bundle and four regression tests for port reopening, file validation, unverified completion, and invalid response lengths. The simulated upgrade compares command order, metadata, transferred bytes, and progress events. It does not test physical USB, device reboot behavior, or flashing on real hardware.
+Expected result: **22 passed, 0 failed**. The suite includes 16 parity tests against the saved upstream bundle and six regression tests covering port reopening and replacement, file validation, unverified completion, and invalid response lengths. The simulated upgrade compares command order, metadata, transferred bytes, and progress events. It does not test physical USB, device reboot behavior, or flashing on real hardware.
+
+On November 17, 2026, the web tool completed a same-version reflash on an **Ascent VRX** (`FPV-Ascent-Gnd-485-V1.1-1.0`) in Chrome on Windows using `Ascent_G_Gnd_17_5_8.img`. The receiver accepted all 50,310,452 bytes in 48 chunks with zero retries. The device passed file verification and reported the expected firmware after the final reboot. Chrome required **Select port again** after both reboots.
 
 ## How it works
 
@@ -47,9 +49,11 @@ The app checks and reads the image, queries the device, and reopens the port aft
 | --- | --- |
 | Page, controls, and styles | [index.html](index.html), [src/ui.js](src/ui.js), [src/styles.css](src/styles.css) |
 | Upgrade flow and firmware matching | [src/firmware.js](src/firmware.js), [src/device.js](src/device.js) |
-| Web Serial, ACKs, and retries | [src/transport.js](src/transport.js), [src/client.js](src/client.js) |
+| Web Serial, reconnect, ACKs, and retries | [src/transport.js](src/transport.js), [src/serial-reconnect.js](src/serial-reconnect.js), [src/client.js](src/client.js) |
 | Packet layout, limits, and checksums | [src/packet.js](src/packet.js), [src/constants.js](src/constants.js), [src/crc32.js](src/crc32.js), [src/md5.js](src/md5.js) |
 | Compatibility reference and tests | [reference/original.min.js](reference/original.min.js), [tests/tests.js](tests/tests.js) |
+
+The Web Serial buffer fits a standard 1 MiB firmware chunk plus its header. After each reboot, the app refreshes the list of authorized ports and checks device identity before using a replacement. If the device rejects the transfer at verification, the log includes the device's byte counts and the number of chunk retries.
 
 The client rejects oversized or incomplete replies. Incoming CRC enforcement is pending verification against real device replies. The firmware MD5 is used for transfer verification and does not authenticate the image.
 

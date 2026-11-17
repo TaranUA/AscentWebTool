@@ -6,7 +6,7 @@
  * available, with a timeout.
  */
 
-import { WRITE_SLICE_SIZE } from "./constants.js";
+import { SERIAL_BUFFER_SIZE, WRITE_SLICE_SIZE } from "./constants.js";
 
 export class TransportTimeoutError extends Error {
   constructor(message = "transport read timed out") {
@@ -32,7 +32,7 @@ export class SerialTransport {
   }
 
   async open(baudRate = 115200) {
-    await this.port.open({ baudRate });
+    await this.port.open({ baudRate, bufferSize: SERIAL_BUFFER_SIZE });
     this.opened = true;
     this.pending = new Uint8Array(0);
     this.pumpError = null;
