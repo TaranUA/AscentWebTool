@@ -798,6 +798,44 @@ test("Reconnect allows a user-selected clean-mode port with no serial number", a
   }
 });
 
+test("Single-device reconnect accepts an omitted serial only for one matching port", async () => {
+  class RebootPort extends MockPort {
+    getInfo() { return { usbVendorId: 7541, usbProductId: 257 }; }
+  }
+  const original = new RebootPort(makeDeviceInfoPayload());
+  original.connected = false;
+  const clean = new RebootPort(makeDeviceInfoPayload({ serialNumber: "" }));
+  const other = new RebootPort(makeDeviceInfoPayload({ serialNumber: "SN-other" }));
+  const expected = parseDeviceInfo(original.deviceInfoPayload);
+  const serial = { getPorts: async () => [clean] };
+
+  for (const { ports, optIn } of [
+    { ports: [clean], optIn: false },
+    { ports: [clean, other], optIn: true },
+    { ports: [other], optIn: true },
+  ]) {
+    const connector = new SerialReconnector({ getPorts: async () => ports }, original, {
+      allowSingleDevice: optIn,
+    });
+    let rejected = false;
+    try {
+      const reopened = await connector.open(expected, 5000);
+      await reopened.transport.close();
+    } catch (error) {
+      rejected = error.message.includes("did not identify itself");
+    }
+    assert(rejected, "reconnect must require opt-in, a sole candidate, and no serial mismatch");
+  }
+
+  const connector = new SerialReconnector(serial, original, { allowSingleDevice: true });
+  const reopened = await connector.open(expected, 5000);
+  try {
+    assertEqual(reopened.transport.port, clean, "used the sole authorized clean-mode port");
+  } finally {
+    await reopened.transport.close();
+  }
+});
+
 test("Invalid firmware is rejected before opening the serial port", async () => {
   const cases = [
     [new File([], "empty.img"), "Firmware image is empty"],

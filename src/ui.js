@@ -20,6 +20,7 @@ const elements = {
   fileInput: getElement("file-input"),
   upgradeButton: getElement("btn-upgrade"),
   reconnectButton: getElement("btn-reconnect"),
+  singleDeviceReconnect: getElement("single-device-reconnect"),
   progressBar: getElement("progress-bar"),
   statusText: getElement("status-text"),
   log: getElement("log"),
@@ -162,7 +163,10 @@ async function handleUpgrade() {
   elements.statusText.textContent = "Checking firmware image…";
 
   const port = state.port;
-  const reconnect = new SerialReconnector(navigator.serial, port);
+  const reconnect = new SerialReconnector(navigator.serial, port, {
+    allowSingleDevice: elements.singleDeviceReconnect.checked,
+  });
+  elements.singleDeviceReconnect.disabled = true;
   const selectRebootedPort = async () => {
     elements.reconnectButton.disabled = true;
     try {
@@ -211,6 +215,7 @@ async function handleUpgrade() {
   } finally {
     state.port = reconnect.port;
     elements.reconnectButton.hidden = true;
+    elements.singleDeviceReconnect.disabled = false;
     elements.reconnectButton.removeEventListener("click", selectRebootedPort);
     elements.connectButton.disabled = false;
     elements.fileInput.disabled = false;

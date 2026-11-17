@@ -7,11 +7,12 @@ import { SerialTransport } from "./transport.js";
  * every attempt. Probe replacement ports before sending upgrade commands.
  */
 export class SerialReconnector {
-  constructor(serial, port) {
+  constructor(serial, port, { allowSingleDevice = false } = {}) {
     this.serial = serial;
     this.port = port;
     this.usbInfo = port.getInfo();
     this.selectedPort = null;
+    this.allowSingleDevice = allowSingleDevice;
   }
 
   async selectPort() {
@@ -25,6 +26,9 @@ export class SerialReconnector {
   async open(expectedDevice, remainingMs) {
     const deadline = Date.now() + remainingMs;
     const ports = await this.serial.getPorts();
+    const sameUsbPorts = ports.filter(port => port.connected !== false && this.matchesUsbInfo(port));
+    const soleCandidate = this.allowSingleDevice && this.usbInfo.usbProductId !== undefined &&
+      sameUsbPorts.length === 1 ? sameUsbPorts[0] : null;
     const candidates = new Set([this.selectedPort, this.port, ...ports]);
     let lastError = new Error("Select the rebooted device in the browser's port picker.");
 
@@ -44,7 +48,7 @@ export class SerialReconnector {
           const info = await client.getDeviceInfo({
             totalTimeoutMs: Math.max(1, Math.min(2_000, deadline - Date.now())),
           });
-          if (!matchesDevice(expectedDevice, info, selected)) {
+          if (!matchesDevice(expectedDevice, info, selected || port === soleCandidate)) {
             throw new Error("The selected port did not identify itself as the original device.");
           }
         }
@@ -67,13 +71,14 @@ export class SerialReconnector {
   }
 }
 
-function matchesDevice(expected, actual, selected) {
+function matchesDevice(expected, actual, allowMissingSerial) {
   if (actual.status !== 0 || expected.deviceName !== actual.deviceName) return false;
 
   const expectedSerial = expected.serialNumber.trim();
   const actualSerial = actual.serialNumber.trim();
   if (expectedSerial && actualSerial) return expectedSerial === actualSerial;
 
-  // When clean mode omits a serial number, a fresh user selection is needed.
-  return selected && expected.firmwareInfo === actual.firmwareInfo;
+  // Clean mode can omit the serial number. Require a matching firmware version
+  // and either a fresh selection or the user's single-device opt-in.
+  return allowMissingSerial && expected.firmwareInfo === actual.firmwareInfo;
 }

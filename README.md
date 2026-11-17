@@ -17,6 +17,8 @@ An unofficial browser-based firmware upgrader for Caddx Ascent FPV video devices
 
 The device's reported information matters more than the USB label or vendor ID. For example, the upstream author observed both the Ascent Lite+ and GT Pro using USB vendor ID `0x1D76`. See the [upstream hardware notes](https://github.com/seriyps/ascent-pc-tool/blob/4d990c0e241afd825b2dc33a07098108badae269/AGENTS.md#the-hardware).
 
+Chrome can reconnect without the picker when it still grants the site access to the port. If clean mode omits the device serial number, the optional reconnect checkbox lets the tool use a single authorized port with matching USB IDs, model, and firmware. Enable it only when one matching device is plugged in. Chrome administrators can grant access for a specific origin and USB device type using [SerialAllowUsbDevicesForUrls](https://chromeenterprise.google/intl/en_us/policies/serial-allow-usb-devices-for-urls/). That setting applies to the entire origin.
+
 ## Run locally
 
 From the repository root, serve the files with Python:
@@ -37,9 +39,11 @@ node tests/run-browser.mjs
 
 Set `CHROME_BIN` to the browser executable if Chrome is installed in a nonstandard location.
 
-Expected result: **22 passed, 0 failed**. The suite includes 16 parity tests against the saved upstream bundle and six regression tests covering port reopening and replacement, file validation, unverified completion, and invalid response lengths. The simulated upgrade compares command order, metadata, transferred bytes, and progress events. It does not test physical USB, device reboot behavior, or flashing on real hardware.
+Expected result: **23 passed, 0 failed**. The suite includes 16 parity tests against the saved upstream bundle and seven regression tests covering port reopening and replacement, file validation, unverified completion, and invalid response lengths. The simulated upgrade compares command order, metadata, transferred bytes, and progress events. It does not test physical USB, device reboot behavior, or flashing on real hardware.
 
-On November 17, 2026, the web tool completed a same-version reflash on an **Ascent VRX** (`FPV-Ascent-Gnd-485-V1.1-1.0`) in Chrome on Windows using `Ascent_G_Gnd_17_5_8.img`. The receiver accepted all 50,310,452 bytes in 48 chunks with zero retries. The device passed file verification and reported the expected firmware after the final reboot. Chrome required **Select port again** after both reboots.
+On November 17, 2026, the web tool completed a same-version reflash on an **Ascent VRX** (`FPV-Ascent-Gnd-485-V1.1-1.0`) in Chrome on Windows using `Ascent_G_Gnd_17_5_8.img`. The receiver accepted all 50,310,452 bytes in 48 chunks with zero retries. Chrome required **Select port again** after both reboots.
+
+A follow-up reflash used the single-device option and a temporary Chrome policy scoped to the local preview and USB IDs `1D75:0101`. Both reconnects completed without opening the port picker. After the final reboot, the VRX reported the expected firmware and hardware version in normal mode.
 
 ## How it works
 
